@@ -96,16 +96,46 @@ function! GPTSendLines() range
   " ---------------------------------------------------
   " Payload bauen (Responses API + Web Search)
   " ---------------------------------------------------
-  let l:base_payload = {
-        \ 'model': 'gpt-5.2',
-        \ 'instructions': get(g:gpt_prompts, g:gpt_active_prompt, g:gpt_prompts['default']),
-        \ 'input': [
-      \   {'role': 'system', 'content': 'Du bist ein wissenschaftlicher Assistent. Antworte präzise, faktenbasiert und objektiv.'},
-      \   {'role': 'user', 'content': substitute(l:user_input, "^User:\\s*", "", "")}
-      \ ],
-        \ 'tools': [{'type':'web_search_preview'}],
-        \ 'tool_choice': 'auto'
-        \ }
+" Fr, 09.10.2026 15:53:10 (CEST) 
+" let l:base_payload = {
+"     \ 'model': 'gpt-6.1-sol',
+"     \ 'instructions': get(g:gpt_prompts, g:gpt_active_prompt, g:gpt_prompts['default']) 
+"     \   . "\nDu bist ein wissenschaftlicher Assistent. Antworte präzise, faktenbasiert und objektiv."
+"     \   . "\nNutze das Websuche-Tool NUR, wenn die Benutzeranfrage aktuelle Ereignisse, Echtzeitdaten oder dir unbekannte Fakten betrifft. Generiere Antworten zu Logik, Code oder allgemeinem Wissen direkt ohne Websuche.",
+"     \ 'input': [
+"     \   {'role': 'user', 'content': substitute(l:user_input, "^User:\\s*", "", "")}
+"     \ ],
+"     \ 'reasoning': {'effort': 'low'},
+"     \ 'tools': [{'type': 'web_search'}],
+"     \ 'tool_choice': 'auto'
+"     \ }
+" 1. Prüfe, ob die Eingabe mit einem Such-Präfix (z. B. '!') beginnt
+let l:clean_input = substitute(l:user_input, "^User:\\s*", "", "")
+let l:needs_search = 0
+
+if l:clean_input =~ '^!'
+    let l:needs_search = 1
+    " Entferne das Ausrufezeichen und führende Leerzeichen für die API-Anfrage
+    let l:clean_input = substitute(l:clean_input, "^!\\s*", "", "")
+endif
+
+" 2. Erstelle den Basis-Payload (ohne Tools)
+let l:base_payload = {
+    \ 'model': 'gpt-6.1-sol',
+    \ 'instructions': get(g:gpt_prompts, g:gpt_active_prompt, g:gpt_prompts['default']) . "\nDu bist ein wissenschaftlicher Assistent. Antworte präzise, faktenbasiert und objektiv.",
+    \ 'input': [
+    \   {'role': 'user', 'content': l:clean_input}
+    \ ],
+    \ 'reasoning': {'effort': 'low'}
+    \ }
+
+" 3. Hänge das Web-Tool NUR an, wenn das Präfix erkannt wurde
+if l:needs_search
+    let l:base_payload['tools'] = [{'type': 'web_search'}]
+    let l:base_payload['tool_choice'] = 'auto'
+    " Optional: Dem Modell im Prompt sagen, dass es jetzt suchen MUSS
+    let l:base_payload['instructions'] .= "\nNutze das Websuche-Tool, um die Anfrage mit aktuellen Webquellen abzusichern."
+endif
 
   " previous_response_id für laufenden Kontext
   if !empty(s:gpt_previous_response_id)
@@ -173,10 +203,15 @@ function! GPTSendLines() range
 
     let l:answer = join(l:decoded,"\n")
     let l:out_lines = split(l:answer,"\n")
-    if !empty(l:out_lines)
-      let l:out_lines[0] = 'GPT-5: '.l:out_lines[0]
-    else
-      let l:out_lines = ['GPT-5:']
+let l:prefix = 'GPT: ['.get(l:json, 'model', 'unbekannt').']'
+if !empty(l:out_lines)
+  let l:out_lines[0] = l:prefix.' '.l:out_lines[0]
+else
+  let l:out_lines = [l:prefix]
+"     if !empty(l:out_lines)
+"       let l:out_lines[0] = 'GPT-5: '.l:out_lines[0]
+"     else
+"       let l:out_lines = ['GPT-5:']
     endif
 
     call s:AppendToGPTBuffer(['']+l:out_lines+['','User:'])
